@@ -219,12 +219,23 @@ func (o Owners) removeSubdirs(dirs sets.String) {
 	}
 }
 
+type ApprovalInfo struct {
+	Reference string
+	Path      string
+}
+
 // Approval has the information about each approval on a PR
 type Approval struct {
+	Login string         // Login of the approver (can include uppercase)
+	How   string         // How did the approver approved
+	Infos []ApprovalInfo // More information about the approval
+}
+
+// NoIssueApproval has the information about each "no-issue" approval on a PR
+type NoIssueApproval struct {
 	Login     string // Login of the approver (can include uppercase)
-	How       string // How did the approver approved
+	How       string // How did the approver approve
 	Reference string // Where did the approver approved
-	NoIssue   bool   // Approval also accepts missing associated issue
 }
 
 // String creates a link for the approval. Use `Login` if you just want the name.
@@ -240,11 +251,12 @@ func (a Approval) String() string {
 // Approvers is struct that provide functionality with regard to approvals of a specific
 // code change.
 type Approvers struct {
-	owners          Owners
-	approvers       map[string]Approval // The keys of this map are normalized to lowercase.
-	assignees       sets.String
-	AssociatedIssue int
-	RequireIssue    bool
+	owners           Owners
+	approvers        map[string]Approval // The keys of this map are normalized to lowercase.
+	noissueapprovers map[string]NoIssueApproval
+	assignees        sets.String
+	AssociatedIssue  int
+	RequireIssue     bool
 
 	ManuallyApproved func() bool
 }
@@ -284,49 +296,73 @@ func NewApprovers(owners Owners) Approvers {
 // If someone approves a PR multiple times, we only want to keep the
 // latest approval, unless a previous approval was "no-issue", and the
 // most recent isn't.
+/*
 func (ap *Approvers) shouldNotOverrideApproval(login string, noIssue bool) bool {
 	login = strings.ToLower(login)
 	approval, alreadyApproved := ap.approvers[login]
 
 	return alreadyApproved && approval.NoIssue && !noIssue
 }
+*/
 
 // AddLGTMer adds a new LGTM Approver
-func (ap *Approvers) AddLGTMer(login, reference string, noIssue bool) {
-	if ap.shouldNotOverrideApproval(login, noIssue) {
-		return
-	}
-	ap.approvers[strings.ToLower(login)] = Approval{
-		Login:     login,
-		How:       "LGTM",
-		Reference: reference,
-		NoIssue:   noIssue,
+func (ap *Approvers) AddLGTMer(login, reference, path string, noIssue bool) {
+	if noIssue {
+		ap.addNoIssueApproval(login, "LGTM", reference)
+	} else {
+		ap.addApproval(login, "LGTM", reference, path)
 	}
 }
 
 // AddApprover adds a new Approver
-func (ap *Approvers) AddApprover(login, reference string, noIssue bool) {
-	if ap.shouldNotOverrideApproval(login, noIssue) {
-		return
+func (ap *Approvers) AddApprover(login, reference, path string, noIssue bool) {
+	if noIssue {
+		ap.addNoIssueApproval(login, "Approved", reference)
+	} else {
+		ap.addApproval(login, "Approved", reference, path)
 	}
-	ap.approvers[strings.ToLower(login)] = Approval{
+}
+
+func (ap *Approvers) addApproval(login, how, reference, path string) {
+	var p string
+	if path == "" {
+		p = "*"
+	} else {
+		p = path
+	}
+	if approval, ok := ap.approvers[strings.ToLower(login)]; !ok {
+		ap.approvers[strings.ToLower(login)] = Approval{
+			Login: login,
+			How:   how,
+			Infos: []ApprovalInfo{
+				{
+					Reference: reference,
+					Path:      p,
+				},
+			},
+		}
+	} else {
+		approval.Infos = append(approval.Infos, ApprovalInfo{
+			Reference: reference,
+			Path:      p,
+		})
+	}
+}
+
+func (ap *Approvers) addNoIssueApproval(login, how, reference string) {
+	ap.noissueapprovers[strings.ToLower(login)] = NoIssueApproval{
 		Login:     login,
-		How:       "Approved",
+		How:       how,
 		Reference: reference,
-		NoIssue:   noIssue,
 	}
 }
 
 // AddAuthorSelfApprover adds the author self approval
-func (ap *Approvers) AddAuthorSelfApprover(login, reference string, noIssue bool) {
-	if ap.shouldNotOverrideApproval(login, noIssue) {
-		return
-	}
-	ap.approvers[strings.ToLower(login)] = Approval{
-		Login:     login,
-		How:       "Author self-approved",
-		Reference: reference,
-		NoIssue:   noIssue,
+func (ap *Approvers) AddAuthorSelfApprover(login, reference, path string, noIssue bool) {
+	if noIssue {
+		ap.addNoIssueApproval(login, "Author self-approved", reference)
+	} else {
+		ap.addApproval(login, "Author self-approved", reference, path)
 	}
 }
 
