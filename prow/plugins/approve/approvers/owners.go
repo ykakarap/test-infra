@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -306,29 +307,18 @@ func (ap *Approvers) shouldNotOverrideApproval(login string, noIssue bool) bool 
 */
 
 // AddLGTMer adds a new LGTM Approver
-func (ap *Approvers) AddLGTMer(login, reference, path string, noIssue bool) {
-	if noIssue {
-		ap.addNoIssueApproval(login, "LGTM", reference)
-	} else {
-		ap.addApproval(login, "LGTM", reference, path)
-	}
+func (ap *Approvers) AddLGTMer(login, reference, path string) {
+	ap.addApproval(login, "LGTM", reference, path)
 }
 
 // AddApprover adds a new Approver
-func (ap *Approvers) AddApprover(login, reference, path string, noIssue bool) {
-	if noIssue {
-		ap.addNoIssueApproval(login, "Approved", reference)
-	} else {
-		ap.addApproval(login, "Approved", reference, path)
-	}
+func (ap *Approvers) AddApprover(login, reference, path string) {
+	ap.addApproval(login, "Approved", reference, path)
 }
 
-func (ap *Approvers) addApproval(login, how, reference, path string) {
-	var p string
-	if path == "" {
-		p = "*"
-	} else {
-		p = path
+func (ap *Approvers) addApproval(login, how, reference, approvedPath string) {
+	if approvedPath == "" {
+		approvedPath = "*"
 	}
 	if approval, ok := ap.approvers[strings.ToLower(login)]; !ok {
 		ap.approvers[strings.ToLower(login)] = Approval{
@@ -337,16 +327,24 @@ func (ap *Approvers) addApproval(login, how, reference, path string) {
 			Infos: []ApprovalInfo{
 				{
 					Reference: reference,
-					Path:      p,
+					Path:      approvedPath,
 				},
 			},
 		}
 	} else {
 		approval.Infos = append(approval.Infos, ApprovalInfo{
 			Reference: reference,
-			Path:      p,
+			Path:      approvedPath,
 		})
 	}
+}
+
+func (ap *Approvers) AddNoIssueApprover(login, reference string) {
+	ap.addNoIssueApproval(login, "Approved", reference)
+}
+
+func (ap *Approvers) AddNoIssueLGTMer(login, reference string) {
+	ap.addNoIssueApproval(login, "LGTM", reference)
 }
 
 func (ap *Approvers) addNoIssueApproval(login, how, reference string) {
@@ -359,16 +357,35 @@ func (ap *Approvers) addNoIssueApproval(login, how, reference string) {
 
 // AddAuthorSelfApprover adds the author self approval
 func (ap *Approvers) AddAuthorSelfApprover(login, reference, path string, noIssue bool) {
-	if noIssue {
-		ap.addNoIssueApproval(login, "Author self-approved", reference)
-	} else {
-		ap.addApproval(login, "Author self-approved", reference, path)
-	}
+	ap.addApproval(login, "Author self-approved", reference, path)
+}
+
+func (ap *Approvers) AddAuthorSelfNoIssueApprover(login, reference string) {
+	ap.addNoIssueApproval(login, "Author self-approved", reference)
 }
 
 // RemoveApprover removes an approver from the list.
-func (ap *Approvers) RemoveApprover(login string) {
-	delete(ap.approvers, strings.ToLower(login))
+func (ap *Approvers) RemoveApprover(login, targetPath string) {
+	if targetPath == "*" {
+		delete(ap.approvers, strings.ToLower(login))
+	} else {
+		approval, ok := ap.approvers[strings.ToLower(login)]
+		if !ok {
+			return
+		}
+		newInfos := []ApprovalInfo{}
+		for _, info := range approval.Infos {
+			if !wildcardPathSubset(targetPath, info.Path) {
+				newInfos = append(newInfos, info)
+			}
+		}
+
+		if len(newInfos) > 0 {
+			approval.Infos = newInfos
+		} else {
+			delete(ap.approvers, strings.ToLower(login))
+		}
+	}
 }
 
 // AddAssignees adds assignees to the list
@@ -715,4 +732,54 @@ func getGubernatorMetadata(toBeAssigned []string) string {
 		return fmt.Sprintf("\n<!-- META=%s -->", bytes)
 	}
 	return ""
+}
+
+func wildcardPathMatch(pattern, targetPath string) bool {
+	if (len(pattern) == 0) != (len(targetPath) == 0) {
+		return false
+	}
+
+	if len(pattern) == 0 && len(targetPath) == 0 {
+		return true
+	}
+
+	var patternMatch, patternRemain string
+	var targetPathMatch, targetPathRemain string
+
+	patternSplitIndex := strings.IndexRune(pattern, '/')
+	if patternSplitIndex != -1 {
+		patternMatch, patternRemain = pattern[:patternSplitIndex], pattern[patternSplitIndex+1:]
+	} else {
+		patternMatch = pattern
+	}
+
+	targetPathSplitIndex := strings.IndexRune(targetPath, '/')
+	if targetPathSplitIndex != -1 {
+		targetPathMatch, targetPathRemain = targetPath[:targetPathSplitIndex], targetPath[targetPathSplitIndex+1:]
+	} else {
+		targetPathMatch = targetPath
+	}
+
+	if patternMatch == "*" && len(patternRemain) == 0 {
+		// everything below is a match. return true
+		return true
+	}
+
+	if patternMatch == "*" {
+		return wildcardPathMatch(patternRemain, targetPathRemain) || wildcardPathMatch(pattern, targetPathRemain)
+	}
+
+	matched, err := path.Match(patternMatch, targetPathMatch)
+	if err != nil {
+		return false
+	}
+	if matched {
+		return wildcardPathMatch(patternRemain, targetPathRemain)
+	}
+	return false
+}
+
+func wildcardPathSubset(pattern, targetPath string) bool {
+	targetPath = strings.ReplaceAll(targetPath, "*", "xyz")
+	return wildcardPathMatch(pattern, targetPath)
 }
