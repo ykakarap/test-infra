@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package approve
+package approve2
 
 import (
 	"fmt"
@@ -32,16 +32,17 @@ import (
 	"k8s.io/test-infra/prow/labels"
 	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
-	"k8s.io/test-infra/prow/plugins/approve/approvers"
+	"k8s.io/test-infra/prow/plugins/approve2/approvers"
 	"k8s.io/test-infra/prow/repoowners"
 )
 
 const (
 	// PluginName defines this plugin's registered name.
-	PluginName = "approve"
+	PluginName = "approve2"
 
-	approveCommand  = "APPROVE"
+	approveCommand  = "APPROVE2"
 	cancelArgument  = "cancel"
+	filesArgument   = "files"
 	lgtmCommand     = "LGTM"
 	noIssueArgument = "no-issue"
 )
@@ -108,7 +109,7 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 
 	approveConfig := map[string]string{}
 	for _, repo := range enabledRepos {
-		opts := config.ApproveFor(repo.Org, repo.Repo)
+		opts := config.Approve2For(repo.Org, repo.Repo)
 		approveConfig[repo.String()] = fmt.Sprintf("Pull requests %s require an associated issue.<br>Pull request authors %s implicitly approve their own PRs.<br>The /lgtm [cancel] command(s) %s act as approval.<br>A GitHub approved or changes requested review %s act as approval or cancel respectively.", doNot(opts.IssueRequired), doNot(opts.HasSelfApproval()), willNot(opts.LgtmActsAsApprove), willNot(opts.ConsiderReviewState()))
 	}
 
@@ -125,23 +126,32 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 		},
 	})
 	if err != nil {
-		logrus.WithError(err).Warnf("cannot generate comments for %s plugin", PluginName)
+		logrus.WithError(err).Warn("cannot generate comments for approve plugin")
 	}
 
 	pluginHelp := &pluginhelp.PluginHelp{
-		Description: `The approve plugin implements a pull request approval process that manages the '` + labels.Approved + `' label and an approval notification comment. Approval is achieved when the set of users that have approved the PR is capable of approving every file changed by the PR. A user is able to approve a file if their username or an alias they belong to is listed in the 'approvers' section of an OWNERS file in the directory of the file or higher in the directory tree.
+		Description: `The approve2 plugin implements a pull request approval process that manages the '` + labels.Approved + `' label and an approval notification comment. Approval is achieved when all the file changes in the PR are approved by at least one user per file. A user is able to approve a file if their username or an alias they belong to is listed in the 'approvers' section of an OWNERS file in the directory of the file or higher in the directory tree.
 <br>
 <br>Per-repo configuration may be used to require that PRs link to an associated issue before approval is granted. It may also be used to specify that the PR authors implicitly approve their own PRs.
-<br>For more information see <a href="https://git.k8s.io/test-infra/prow/plugins/approve/approvers/README.md">here</a>.`,
+<br>For more information see <a href="https://git.k8s.io/test-infra/prow/plugins/approve2/approvers/README.md">here</a>.`,
 		Config:  approveConfig,
 		Snippet: yamlSnippet,
 	}
 	pluginHelp.AddCommand(pluginhelp.Command{
-		Usage:       "/approve [no-issue|cancel]",
+		Usage:       "/approve2 [no-issue|cancel|files <path-to-file>]",
 		Description: "Approves a pull request",
 		Featured:    true,
 		WhoCanUse:   "Users listed as 'approvers' in appropriate OWNERS files.",
-		Examples:    []string{"/approve", "/approve no-issue"},
+		Examples: []string{
+			"/approve2",
+			"/approve2 files *",
+			"/approve2 files dir/*",
+			"/approve2 files dir/*_test.go",
+			"/approve2 files dir/file.go",
+			"/approve2 files dir/*/*_test.go",
+			"/approve2 no-issue",
+			"/approve2 cancel",
+		},
 	})
 	return pluginHelp, nil
 }
@@ -172,7 +182,7 @@ func handleGenericComment(log *logrus.Entry, ghc githubClient, oc ownersClient, 
 		return err
 	}
 
-	opts := config.ApproveFor(ce.Repo.Owner.Login, ce.Repo.Name)
+	opts := config.Approve2For(ce.Repo.Owner.Login, ce.Repo.Name)
 	if !isApprovalCommand(botUserChecker, opts.LgtmActsAsApprove, &comment{Body: ce.Body, Author: ce.User.Login}) {
 		log.Debug("Comment does not constitute approval, skipping event.")
 		return nil
@@ -237,7 +247,7 @@ func handleReview(log *logrus.Entry, ghc githubClient, oc ownersClient, githubCo
 		return err
 	}
 
-	opts := config.ApproveFor(re.Repo.Owner.Login, re.Repo.Name)
+	opts := config.Approve2For(re.Repo.Owner.Login, re.Repo.Name)
 
 	// Check for an approval command is in the body. If one exists, let the
 	// genericCommentEventHandler handle this event. Approval commands override
@@ -324,7 +334,7 @@ func handlePullRequest(log *logrus.Entry, ghc githubClient, oc ownersClient, git
 		ghc,
 		repo,
 		githubConfig,
-		config.ApproveFor(pre.Repo.Owner.Login, pre.Repo.Name),
+		config.Approve2For(pre.Repo.Owner.Login, pre.Repo.Name),
 		&state{
 			org:       pre.Repo.Owner.Login,
 			repo:      pre.Repo.Name,
@@ -371,7 +381,7 @@ func findAssociatedIssue(body, org string) (int, error) {
 // - Iff all files have been approved, the bot will add the "approved" label.
 // - Iff a cancel command is found, that reviewer will be removed from the approverSet
 // 	and the munger will remove the approved label if it has been applied
-func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConfig config.GitHubOptions, opts *plugins.Approve, pr *state) error {
+func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConfig config.GitHubOptions, opts *plugins.Approve2, pr *state) error {
 	funcStart := time.Now()
 	defer func() {
 		log.WithField("duration", time.Since(funcStart).String()).Debug("Completed handle")
@@ -436,7 +446,7 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 
 	// Author implicitly approves their own PR if config allows it
 	if opts.HasSelfApproval() {
-		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", false)
+		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", "")
 	} else {
 		// Treat the author as an assignee, and suggest them if possible
 		approversHandler.AddAssignees(pr.author)
@@ -557,8 +567,8 @@ func isApprovalState(isBot func(string) bool, reviewActsAsApprove bool, c *comme
 	// matches the constant.
 	reviewState := github.ReviewState(strings.ToUpper(string(c.ReviewState)))
 
-	// ReviewStateApproved = /approve
-	// ReviewStateChangesRequested = /approve cancel
+	// ReviewStateApproved = /approve2
+	// ReviewStateChangesRequested = /approve2 cancel
 	// ReviewStateDismissed = remove previous approval or disapproval
 	// (Reviews can go from Approved or ChangesRequested to Dismissed
 	// state if the Dismiss action is used)
@@ -603,7 +613,7 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			approversHandler.AddApprover(
 				c.Author,
 				c.HTMLURL,
-				false,
+				"",
 			)
 		}
 		if reviewActsAsApprove && c.ReviewState == github.ReviewStateChangesRequested {
@@ -615,34 +625,39 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			if name != approveCommand && name != lgtmCommand {
 				continue
 			}
+
 			args := strings.ToLower(strings.TrimSpace(match[2]))
 			if strings.Contains(args, cancelArgument) {
 				approversHandler.RemoveApprover(c.Author)
 				continue
 			}
 
+			argsSplit := strings.Fields(args)
+			path := ""
+			if len(argsSplit) >= 2 && strings.Contains(argsSplit[0], filesArgument) {
+				path = strings.TrimSpace(argsSplit[1])
+			}
+
+			if args == noIssueArgument {
+				if c.Author == author {
+					approversHandler.AddNoIssueAuthorSelfApprover(c.Author, c.HTMLURL)
+				}
+				if name == approveCommand {
+					approversHandler.AddNoIssueApprover(c.Author, c.HTMLURL)
+				} else {
+					approversHandler.AddNoIssueLGTMer(c.Author, c.HTMLURL)
+				}
+				continue
+			}
+
 			if c.Author == author {
-				approversHandler.AddAuthorSelfApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddAuthorSelfApprover(c.Author, c.HTMLURL, path)
 			}
-
 			if name == approveCommand {
-				approversHandler.AddApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddApprover(c.Author, c.HTMLURL, path)
 			} else {
-				approversHandler.AddLGTMer(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddLGTMer(c.Author, c.HTMLURL, path)
 			}
-
 		}
 	}
 }
