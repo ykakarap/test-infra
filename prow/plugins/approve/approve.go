@@ -42,6 +42,7 @@ const (
 
 	approveCommand  = "APPROVE"
 	cancelArgument  = "cancel"
+	filesArgument   = "files"
 	lgtmCommand     = "LGTM"
 	noIssueArgument = "no-issue"
 )
@@ -438,7 +439,7 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 
 	// Author implicitly approves their own PR if config allows it
 	if opts.HasSelfApproval() {
-		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", false)
+		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", "")
 	} else {
 		// Treat the author as an assignee, and suggest them if possible
 		approversHandler.AddAssignees(pr.author)
@@ -605,7 +606,7 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			approversHandler.AddApprover(
 				c.Author,
 				c.HTMLURL,
-				false,
+				"",
 			)
 		}
 		if reviewActsAsApprove && c.ReviewState == github.ReviewStateChangesRequested {
@@ -617,34 +618,38 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			if name != approveCommand && name != lgtmCommand {
 				continue
 			}
+
 			args := strings.ToLower(strings.TrimSpace(match[2]))
 			if strings.Contains(args, cancelArgument) {
 				approversHandler.RemoveApprover(c.Author)
 				continue
 			}
 
+			path := ""
+			if strings.Contains(args, filesArgument) {
+				path = strings.TrimSpace(match[3])
+			}
+
+			if args == noIssueArgument {
+				if c.Author == author {
+					approversHandler.AddNoIssueAuthorSelfApprover(c.Author, c.HTMLURL)
+				}
+				if name == approveCommand {
+					approversHandler.AddNoIssueApprover(c.Author, c.HTMLURL)
+				} else {
+					approversHandler.AddNoIssueLGTMer(c.Author, c.HTMLURL)
+				}
+				continue
+			}
+
 			if c.Author == author {
-				approversHandler.AddAuthorSelfApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddAuthorSelfApprover(c.Author, c.HTMLURL, path)
 			}
-
 			if name == approveCommand {
-				approversHandler.AddApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddApprover(c.Author, c.HTMLURL, path)
 			} else {
-				approversHandler.AddLGTMer(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddLGTMer(c.Author, c.HTMLURL, path)
 			}
-
 		}
 	}
 }

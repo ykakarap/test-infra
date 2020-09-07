@@ -61,15 +61,15 @@ func NewOwners(log *logrus.Entry, filenames []string, r Repo, s int64) Owners {
 	return Owners{filenames: filenames, repo: r, seed: s, log: log}
 }
 
-// GetApprovers returns a map from ownersFiles -> people that are approvers in them
+// GetApprovers returns a map from filenames -> people that can approve it
 func (o Owners) GetApprovers() map[string]sets.String {
-	ownersToApprovers := map[string]sets.String{}
+	filessToApprovers := map[string]sets.String{}
 
-	for fn := range o.GetOwnersSet() {
-		ownersToApprovers[fn] = o.repo.Approvers(fn)
+	for _, fn := range o.filenames {
+		filessToApprovers[fn] = o.repo.Approvers(fn)
 	}
 
-	return ownersToApprovers
+	return filessToApprovers
 }
 
 // GetLeafApprovers returns a map from ownersFiles -> people that are approvers in them (only the leaf)
@@ -98,19 +98,19 @@ func (o Owners) GetAllPotentialApprovers() []string {
 	return approversOnly
 }
 
-// GetReverseMap returns a map from people -> OWNERS files for which they are an approver
+// GetReverseMap returns a map from people -> files. files for which they are an approver
 func (o Owners) GetReverseMap(approvers map[string]sets.String) map[string]sets.String {
-	approverOwnersfiles := map[string]sets.String{}
-	for ownersFile, approvers := range approvers {
+	approverFiles := map[string]sets.String{}
+	for file, approvers := range approvers {
 		for approver := range approvers {
-			if _, ok := approverOwnersfiles[approver]; ok {
-				approverOwnersfiles[approver].Insert(ownersFile)
+			if _, ok := approverFiles[approver]; ok {
+				approverFiles[approver].Insert(file)
 			} else {
-				approverOwnersfiles[approver] = sets.NewString(ownersFile)
+				approverFiles[approver] = sets.NewString(file)
 			}
 		}
 	}
-	return approverOwnersfiles
+	return approverFiles
 }
 
 func findMostCoveringApprover(allApprovers []string, reverseMap map[string]sets.String, unapproved sets.String) string {
@@ -230,6 +230,15 @@ type Approval struct {
 	Login string         // Login of the approver (can include uppercase)
 	How   string         // How did the approver approved
 	Infos []ApprovalInfo // More information about the approval
+}
+
+func (a Approval) CoversFile(file string) bool {
+	for _, info := range a.Infos {
+		if wildcardPathMatch(info.Path, file) {
+			return true
+		}
+	}
+	return false
 }
 
 // NoIssueApproval has the information about each "no-issue" approval on a PR
@@ -356,36 +365,18 @@ func (ap *Approvers) addNoIssueApproval(login, how, reference string) {
 }
 
 // AddAuthorSelfApprover adds the author self approval
-func (ap *Approvers) AddAuthorSelfApprover(login, reference, path string, noIssue bool) {
+func (ap *Approvers) AddAuthorSelfApprover(login, reference, path string) {
 	ap.addApproval(login, "Author self-approved", reference, path)
 }
 
-func (ap *Approvers) AddAuthorSelfNoIssueApprover(login, reference string) {
+func (ap *Approvers) AddNoIssueAuthorSelfApprover(login, reference string) {
 	ap.addNoIssueApproval(login, "Author self-approved", reference)
 }
 
 // RemoveApprover removes an approver from the list.
-func (ap *Approvers) RemoveApprover(login, targetPath string) {
-	if targetPath == "*" {
-		delete(ap.approvers, strings.ToLower(login))
-	} else {
-		approval, ok := ap.approvers[strings.ToLower(login)]
-		if !ok {
-			return
-		}
-		newInfos := []ApprovalInfo{}
-		for _, info := range approval.Infos {
-			if !wildcardPathSubset(targetPath, info.Path) {
-				newInfos = append(newInfos, info)
-			}
-		}
-
-		if len(newInfos) > 0 {
-			approval.Infos = newInfos
-		} else {
-			delete(ap.approvers, strings.ToLower(login))
-		}
-	}
+// RemoveApprover removes an approver from the list.
+func (ap *Approvers) RemoveApprover(login string) {
+	delete(ap.approvers, strings.ToLower(login))
 }
 
 // AddAssignees adds assignees to the list
@@ -432,17 +423,9 @@ func (ap Approvers) GetNoIssueApproversSet() sets.String {
 // GetFilesApprovers returns a map from files -> list of current approvers.
 func (ap Approvers) GetFilesApprovers() map[string]sets.String {
 	filesApprovers := map[string]sets.String{}
-	currentApprovers := ap.GetCurrentApproversSetCased()
 	for fn, potentialApprovers := range ap.owners.GetApprovers() {
-		// The order of parameter matters here:
-		// - currentApprovers is the list of github handles that have approved
-		// - potentialApprovers is the list of handles in the OWNER
-		// files (lower case).
-		//
-		// We want to keep the syntax of the github handle
-		// rather than the potential mis-cased username found in
-		// the OWNERS file, that's why it's the first parameter.
-		filesApprovers[fn] = IntersectSetsCase(currentApprovers, potentialApprovers)
+		// potentialApprovers is the list of githun handles who can approve the fn.
+		filesApprovers[fn] = approversForFile(fn, potentialApprovers, ap.approvers)
 	}
 
 	return filesApprovers
@@ -451,14 +434,11 @@ func (ap Approvers) GetFilesApprovers() map[string]sets.String {
 // NoIssueApprovers returns the list of people who have "no-issue"
 // approved the pull-request. They are included in the list iff they can
 // approve one of the files.
-func (ap Approvers) NoIssueApprovers() map[string]Approval {
-	nia := map[string]Approval{}
+func (ap Approvers) NoIssueApprovers() map[string]NoIssueApproval {
+	nia := map[string]NoIssueApproval{}
 	reverseMap := ap.owners.GetReverseMap(ap.owners.GetApprovers())
 
-	for login, approver := range ap.approvers {
-		if !approver.NoIssue {
-			continue
-		}
+	for login, approver := range ap.noissueapprovers {
 
 		if len(reverseMap[login]) == 0 {
 			continue
@@ -470,7 +450,7 @@ func (ap Approvers) NoIssueApprovers() map[string]Approval {
 	return nia
 }
 
-// UnapprovedFiles returns owners files that still need approval
+// UnapprovedFiles returns files that still need approval
 func (ap Approvers) UnapprovedFiles() sets.String {
 	unapproved := sets.NewString()
 	for fn, approvers := range ap.GetFilesApprovers() {
@@ -481,19 +461,19 @@ func (ap Approvers) UnapprovedFiles() sets.String {
 	return unapproved
 }
 
-// GetFiles returns owners files that still need approval.
+// GetFiles returns files that still need approval.
 func (ap Approvers) GetFiles(baseURL *url.URL, branch string) []File {
-	allOwnersFiles := []File{}
+	allFiles := []File{}
 	filesApprovers := ap.GetFilesApprovers()
-	for _, file := range ap.owners.GetOwnersSet().List() {
+	for _, file := range ap.owners.filenames {
 		if len(filesApprovers[file]) == 0 {
-			allOwnersFiles = append(allOwnersFiles, UnapprovedFile{
+			allFiles = append(allFiles, UnapprovedFile{
 				baseURL:  baseURL,
 				filepath: file,
 				branch:   branch,
 			})
 		} else {
-			allOwnersFiles = append(allOwnersFiles, ApprovedFile{
+			allFiles = append(allFiles, ApprovedFile{
 				baseURL:   baseURL,
 				filepath:  file,
 				approvers: filesApprovers[file],
@@ -502,7 +482,7 @@ func (ap Approvers) GetFiles(baseURL *url.URL, branch string) []File {
 		}
 	}
 
-	return allOwnersFiles
+	return allFiles
 }
 
 // GetCCs gets the list of suggested approvers for a pull-request.  It
@@ -536,8 +516,8 @@ func (ap Approvers) GetCCs() []string {
 	return suggested.Union(keepAssignees).List()
 }
 
-// AreFilesApproved returns a bool indicating whether or not OWNERS files associated with
-// the PR are approved.  A PR with no OWNERS files is not considered approved. If this
+// AreFilesApproved returns a bool indicating whether or not files associated with
+// the PR are approved.  A PR with no files is not considered approved. If this
 // returns true, the PR may still not be fully approved depending on the associated issue
 // requirement
 func (ap Approvers) AreFilesApproved() bool {
@@ -782,4 +762,22 @@ func wildcardPathMatch(pattern, targetPath string) bool {
 func wildcardPathSubset(pattern, targetPath string) bool {
 	targetPath = strings.ReplaceAll(targetPath, "*", "xyz")
 	return wildcardPathMatch(pattern, targetPath)
+}
+
+// approversForFile return the set of approvers in potentialApprovers who approved the file
+func approversForFile(file string, potentialApprovers sets.String, currentApprovals map[string]Approval) sets.String {
+	approvers := sets.NewString()
+
+	potentialApproversLowerCase := sets.NewString()
+	for item := range potentialApprovers {
+		potentialApproversLowerCase.Insert(strings.ToLower(item))
+	}
+
+	for login, approval := range currentApprovals {
+		if potentialApproversLowerCase.Has(strings.ToLower(login)) && approval.CoversFile(file) {
+			approvers.Insert(login)
+		}
+	}
+
+	return approvers
 }
