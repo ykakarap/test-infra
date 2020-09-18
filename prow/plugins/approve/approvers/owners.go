@@ -241,6 +241,16 @@ func (a Approval) CoversFile(file string) bool {
 	return false
 }
 
+// String creates a link for the approval. Use `Login` if you just want the name.
+func (a Approval) String() string {
+	return fmt.Sprintf(
+		`*<a href="%s" title="%s">%s</a>*`,
+		a.Infos[0].Reference,
+		a.How,
+		a.Login,
+	)
+}
+
 // NoIssueApproval has the information about each "no-issue" approval on a PR
 type NoIssueApproval struct {
 	Login     string // Login of the approver (can include uppercase)
@@ -249,7 +259,7 @@ type NoIssueApproval struct {
 }
 
 // String creates a link for the approval. Use `Login` if you just want the name.
-func (a Approval) String() string {
+func (a NoIssueApproval) String() string {
 	return fmt.Sprintf(
 		`*<a href="%s" title="%s">%s</a>*`,
 		a.Reference,
@@ -464,25 +474,25 @@ func (ap Approvers) UnapprovedFiles() sets.String {
 // GetFiles returns files that still need approval.
 func (ap Approvers) GetFiles(baseURL *url.URL, branch string) []File {
 	allFiles := []File{}
-	filesApprovers := ap.GetFilesApprovers()
-	for _, file := range ap.owners.filenames {
-		if len(filesApprovers[file]) == 0 {
-			allFiles = append(allFiles, UnapprovedFile{
-				baseURL:  baseURL,
-				filepath: file,
-				branch:   branch,
-			})
-		} else {
-			allFiles = append(allFiles, ApprovedFile{
-				baseURL:   baseURL,
-				filepath:  file,
-				approvers: filesApprovers[file],
-				branch:    branch,
-			})
-		}
+	for owner := range ap.UnapprovedOwners() {
+		allFiles = append(allFiles, UnapprovedFile{
+			baseURL:  baseURL,
+			branch:   branch,
+			filepath: owner,
+		})
 	}
 
 	return allFiles
+}
+
+// UnapprovedOwners return the owners files for the unapproved files
+func (ap Approvers) UnapprovedOwners() sets.String {
+	owners := sets.NewString()
+	for fn := range ap.UnapprovedFiles() {
+		owners.Insert(ap.owners.repo.FindApproverOwnersForFile(fn))
+	}
+	ap.owners.removeSubdirs(owners)
+	return owners
 }
 
 // GetCCs gets the list of suggested approvers for a pull-request.  It
@@ -616,8 +626,13 @@ func (ua UnapprovedFile) String() string {
 // GenerateTemplate takes a template, name and data, and generates
 // the corresponding string.
 func GenerateTemplate(templ, name string, data interface{}) (string, error) {
+	funcMaps := template.FuncMap{
+		"sub": func(a, b int) int {
+			return a - b
+		},
+	}
 	buf := bytes.NewBufferString("")
-	if messageTempl, err := template.New(name).Parse(templ); err != nil {
+	if messageTempl, err := template.New(name).Funcs(funcMaps).Parse(templ); err != nil {
 		return "", fmt.Errorf("failed to parse template for %s: %v", name, err)
 	} else if err := messageTempl.Execute(buf, data); err != nil {
 		return "", fmt.Errorf("failed to execute template for %s: %v", name, err)
@@ -667,11 +682,15 @@ The pull request process is described [here]({{ .prProcessLink }})
 
 {{ end -}}
 <details {{if (and (not .ap.AreFilesApproved) (not (call .ap.ManuallyApproved))) }}open{{end}}>
-Needs approval from an approver in each of these files:
-
+Out of {{len .ap.GetFilesApprovers}}, **{{sub (len .ap.GetFilesApprovers) (len .ap.UnapprovedFiles)}}** are approved and **{{len .ap.UnapprovedFiles}}** are unapproved.
+{{if ne (len .ap.UnapprovedFiles) 0 -}}
+Needs approval from approvers in these files:
 {{range .ap.GetFiles .baseURL .branch}}{{.}}{{end}}
+
 Approvers can indicate their approval by writing `+"`/approve`"+` in a comment
+Approvers can also choose to approve only specific files by writing `+"`/approve files <path-to-file>`"+` in a comment
 Approvers can cancel approval by writing `+"`/approve cancel`"+` in a comment
+{{end -}}
 </details>`, "message", map[string]interface{}{"ap": ap, "baseURL": linkURL, "commandHelpLink": commandHelpLink, "prProcessLink": prProcessLink, "org": org, "repo": repo, "branch": branch})
 	if err != nil {
 		ap.owners.log.WithError(err).Errorf("Error generating message.")
