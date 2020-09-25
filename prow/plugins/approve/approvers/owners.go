@@ -128,23 +128,25 @@ func findMostCoveringApprover(allApprovers []string, reverseMap map[string]sets.
 
 // temporaryUnapprovedFiles returns the list of files that wouldn't be
 // approved by the given set of approvers.
-func (o Owners) temporaryUnapprovedFiles(approvers sets.String) sets.String {
+func (o Owners) temporaryUnapprovedFiles(approvals []Approval) sets.String {
 	ap := NewApprovers(o)
-	for approver := range approvers {
-		ap.AddApprover(approver, "", false)
+	for _, aprvl := range approvals {
+		for _, info := range aprvl.Infos {
+			ap.AddApprover(aprvl.Login, info.Reference, info.Path)
+		}
 	}
 	return ap.UnapprovedFiles()
 }
 
 // KeepCoveringApprovers finds who we should keep as suggested approvers given a pre-selection
 // knownApprovers must be a subset of potentialApprovers.
-func (o Owners) KeepCoveringApprovers(reverseMap map[string]sets.String, knownApprovers sets.String, potentialApprovers []string) sets.String {
+func (o Owners) KeepCoveringApprovers(reverseMap map[string]sets.String, knownApprovals []Approval, potentialApprovers []string) sets.String {
 	if len(potentialApprovers) == 0 {
 		o.log.Debug("No potential approvers exist to filter for relevance. Does this repo have OWNERS files?")
 	}
 	keptApprovers := sets.NewString()
 
-	unapproved := o.temporaryUnapprovedFiles(knownApprovers)
+	unapproved := o.temporaryUnapprovedFiles(knownApprovals)
 
 	for _, suggestedApprover := range o.GetSuggestedApprovers(reverseMap, potentialApprovers).List() {
 		if reverseMap[suggestedApprover].Intersection(unapproved).Len() != 0 {
@@ -165,7 +167,7 @@ func (o Owners) GetSuggestedApprovers(reverseMap map[string]sets.String, potenti
 			o.log.Warnf("Couldn't find/suggest approvers for each files. Unapproved: %q", ap.UnapprovedFiles().List())
 			return ap.GetCurrentApproversSet()
 		}
-		ap.AddApprover(newApprover, "", false)
+		ap.AddApprover(newApprover, "", "")
 	}
 
 	return ap.GetCurrentApproversSet()
@@ -189,6 +191,20 @@ func (o Owners) GetShuffledApprovers() []string {
 	people := make([]string, 0, len(approversList))
 	for _, i := range order {
 		people = append(people, approversList[i])
+	}
+	return people
+}
+
+// GetShuffledApprovers shuffles the potential approvers, without the people
+// in remove set, so that we don't always suggest the same people.
+func (o Owners) GetShuffledApproversSubset(remove sets.String) []string {
+	approversList := o.GetAllPotentialApprovers()
+	order := rand.New(rand.NewSource(o.seed)).Perm(len(approversList))
+	people := []string{}
+	for _, i := range order {
+		if !remove.Has(approversList[i]) {
+			people = append(people, approversList[i])
+		}
 	}
 	return people
 }
@@ -512,16 +528,15 @@ func (ap Approvers) UnapprovedOwners() sets.String {
 // The goal of this second step is to only keep the assignees that are
 // the most useful.
 func (ap Approvers) GetCCs() []string {
-	randomizedApprovers := ap.owners.GetShuffledApprovers()
-
-	currentApprovers := ap.GetCurrentApproversSet()
-	approversAndAssignees := currentApprovers.Union(ap.assignees)
+	approversAndAssigneeApprovals := approvalsAndBlanketApprovals(ap.ListApprovals(), ap.assignees)
+	approversAndAssignees := approversOfApprovals(approversAndAssigneeApprovals)
+	randomizedApprovers := ap.owners.GetShuffledApproversSubset(approversAndAssignees)
 	leafReverseMap := ap.owners.GetReverseMap(ap.owners.GetLeafApprovers())
-	suggested := ap.owners.KeepCoveringApprovers(leafReverseMap, approversAndAssignees, randomizedApprovers)
-	approversAndSuggested := currentApprovers.Union(suggested)
-	everyone := approversAndSuggested.Union(ap.assignees)
+	suggested := ap.owners.KeepCoveringApprovers(leafReverseMap, approversAndAssigneeApprovals, randomizedApprovers)
+
+	approversAndSuggestedApprovals := approvalsAndBlanketApprovals(ap.ListApprovals(), suggested)
 	fullReverseMap := ap.owners.GetReverseMap(ap.owners.GetApprovers())
-	keepAssignees := ap.owners.KeepCoveringApprovers(fullReverseMap, approversAndSuggested, everyone.List())
+	keepAssignees := ap.owners.KeepCoveringApprovers(fullReverseMap, approversAndSuggestedApprovals, ap.assignees.List())
 
 	return suggested.Union(keepAssignees).List()
 }
@@ -798,5 +813,39 @@ func approversForFile(file string, potentialApprovers sets.String, currentApprov
 		}
 	}
 
+	return approvers
+}
+
+func approvalsAndBlanketApprovals(approvals []Approval, blanketApprovers sets.String) []Approval {
+	allApprovals := []Approval{}
+
+	apprvs := sets.NewString()
+
+	for _, approval := range approvals {
+		apprvs.Insert(approval.Login)
+		allApprovals = append(allApprovals, approval)
+	}
+
+	for apprvr := range blanketApprovers {
+		if !apprvs.Has(apprvr) {
+			allApprovals = append(allApprovals, Approval{
+				Login: apprvr,
+				Infos: []ApprovalInfo{
+					ApprovalInfo{
+						Path: "*",
+					},
+				},
+			})
+		}
+	}
+
+	return allApprovals
+}
+
+func approversOfApprovals(approvals []Approval) sets.String {
+	approvers := sets.NewString()
+	for _, approval := range approvals {
+		approvers.Insert(approval.Login)
+	}
 	return approvers
 }
