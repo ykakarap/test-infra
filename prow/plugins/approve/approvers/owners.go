@@ -183,6 +183,26 @@ func (o Owners) GetOwnersSet() sets.String {
 	return owners
 }
 
+// GetFolderFiles returns a map from folder(owners file folder) -> files in that folder
+// for this PR
+func (o Owners) GetFolderFiles() map[string]sets.String {
+	folders := o.GetOwnersSet()
+	folderfiles := map[string]sets.String{}
+	for folder := range folders {
+		folderfiles[folder] = sets.NewString()
+	}
+
+	for _, file := range o.filenames {
+		for folder := range folders {
+			if strings.HasPrefix(file, folder) {
+				folderfiles[folder].Insert(file)
+			}
+		}
+	}
+
+	return folderfiles
+}
+
 // GetShuffledApprovers shuffles the potential approvers so that we don't
 // always suggest the same people.
 func (o Owners) GetShuffledApprovers() []string {
@@ -487,7 +507,21 @@ func (ap Approvers) UnapprovedFiles() sets.String {
 	return unapproved
 }
 
-// GetFiles returns files that still need approval.
+// GetFolderStatus returns the approval status of the folders.
+// A folder can be approve, partially approved or unapproved
+func (ap Approvers) GetFolderStatus(baseURL *url.URL, branch string) []File {
+	allFiles := []File{}
+	folderFiles := ap.owners.GetFolderFiles()
+	fileApprovers := ap.GetFilesApprovers()
+
+	for folder := range folderFiles {
+		allFiles = append(allFiles, folderStatus(folder, folderFiles, fileApprovers, baseURL, branch))
+	}
+
+	return allFiles
+}
+
+// GetFiles returns owners files that still need approval.
 func (ap Approvers) GetFiles(baseURL *url.URL, branch string) []File {
 	allFiles := []File{}
 	for owner := range ap.UnapprovedOwners() {
@@ -596,43 +630,72 @@ type File interface {
 	String() string
 }
 
-// ApprovedFile contains the information of a an approved file.
-type ApprovedFile struct {
-	baseURL  *url.URL
-	filepath string
+// ApprovedFolder contains the information of a an approved folder.
+type ApprovedFolder struct {
+	baseURL    *url.URL
+	folderpath string
 	// approvers is the set of users that approved this file change.
 	approvers sets.String
 	branch    string
 }
 
-// UnapprovedFile contains the information of a an unapproved file.
+// PartiallyApprovedFolder contains the information of a an approved folder.
+type PartiallyApprovedFolder struct {
+	baseURL    *url.URL
+	folderpath string
+	approvers  sets.String
+	branch     string
+}
+
+// UnapprovedFolder contains the information of a an unapproved folder.
+type UnapprovedFolder struct {
+	baseURL    *url.URL
+	folderpath string
+	branch     string
+}
+
+func (a ApprovedFolder) String() string {
+	link := fmt.Sprintf("%s/blob/%s/%v",
+		a.baseURL.String(),
+		a.branch,
+		a.folderpath,
+	)
+	return fmt.Sprintf("- ~~[%s](%s)~~ [%v]\n", a.folderpath, link, strings.Join(a.approvers.List(), ","))
+}
+
+func (pa PartiallyApprovedFolder) String() string {
+	link := fmt.Sprintf("%s/blob/%s/%v",
+		pa.baseURL.String(),
+		pa.branch,
+		pa.folderpath,
+	)
+	return fmt.Sprintf("- **[%s](%s)** (partially approved, need additional approvals) [%v]\n", pa.folderpath, link, strings.Join(pa.approvers.List(), ","))
+}
+
+func (ua UnapprovedFolder) String() string {
+	link := fmt.Sprintf("%s/blob/%s/%v",
+		ua.baseURL.String(),
+		ua.branch,
+		ua.folderpath,
+	)
+	return fmt.Sprintf("- **[%s](%s)**\n", ua.folderpath, link)
+}
+
+// UnapprovedFile contains information approved an unapproved owners file
 type UnapprovedFile struct {
 	baseURL  *url.URL
 	filepath string
 	branch   string
 }
 
-func (a ApprovedFile) String() string {
-	fullOwnersPath := filepath.Join(a.filepath, ownersFileName)
-	if strings.HasSuffix(a.filepath, ".md") {
-		fullOwnersPath = a.filepath
+func (uaf UnapprovedFile) String() string {
+	fullOwnersPath := filepath.Join(uaf.filepath, ownersFileName)
+	if strings.HasSuffix(uaf.filepath, ".md") {
+		fullOwnersPath = uaf.filepath
 	}
 	link := fmt.Sprintf("%s/blob/%s/%v",
-		a.baseURL.String(),
-		a.branch,
-		fullOwnersPath,
-	)
-	return fmt.Sprintf("- ~~[%s](%s)~~ [%v]\n", fullOwnersPath, link, strings.Join(a.approvers.List(), ","))
-}
-
-func (ua UnapprovedFile) String() string {
-	fullOwnersPath := filepath.Join(ua.filepath, ownersFileName)
-	if strings.HasSuffix(ua.filepath, ".md") {
-		fullOwnersPath = ua.filepath
-	}
-	link := fmt.Sprintf("%s/blob/%s/%v",
-		ua.baseURL.String(),
-		ua.branch,
+		uaf.baseURL.String(),
+		uaf.branch,
 		fullOwnersPath,
 	)
 	return fmt.Sprintf("- **[%s](%s)**\n", fullOwnersPath, link)
@@ -706,6 +769,10 @@ Approvers can indicate their approval by writing `+"`/approve`"+` in a comment
 Approvers can also choose to approve only specific files by writing `+"`/approve files <path-to-file>`"+` in a comment
 Approvers can cancel approval by writing `+"`/approve cancel`"+` in a comment
 {{end -}}
+
+The status of the PR is:
+{{range .ap.GetFolderStatus .baseURL .branch}}{{.}}{{end}}
+
 </details>`, "message", map[string]interface{}{"ap": ap, "baseURL": linkURL, "commandHelpLink": commandHelpLink, "prProcessLink": prProcessLink, "org": org, "repo": repo, "branch": branch})
 	if err != nil {
 		ap.owners.log.WithError(err).Errorf("Error generating message.")
@@ -848,4 +915,41 @@ func approversOfApprovals(approvals []Approval) sets.String {
 		approvers.Insert(approval.Login)
 	}
 	return approvers
+}
+
+func folderStatus(folder string, folderFiles map[string]sets.String, fileApprovers map[string]sets.String, baseURL *url.URL, branch string) File {
+	approvedFiles, unapprovedFiles := 0, 0
+	approvers := sets.NewString()
+	for file := range folderFiles[folder] {
+		if len(fileApprovers[file]) != 0 {
+			approvedFiles++
+			approvers = approvers.Union(fileApprovers[file])
+		} else {
+			unapprovedFiles++
+		}
+	}
+
+	if unapprovedFiles == 0 {
+		return ApprovedFolder{
+			baseURL:    baseURL,
+			folderpath: folder,
+			approvers:  approvers,
+			branch:     branch,
+		}
+	}
+
+	if approvedFiles == 0 {
+		return UnapprovedFolder{
+			baseURL:    baseURL,
+			branch:     branch,
+			folderpath: folder,
+		}
+	}
+
+	return PartiallyApprovedFolder{
+		baseURL:    baseURL,
+		folderpath: folder,
+		approvers:  approvers,
+		branch:     branch,
+	}
 }
