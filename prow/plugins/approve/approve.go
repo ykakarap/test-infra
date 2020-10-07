@@ -625,9 +625,10 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 				continue
 			}
 
+			argsSplit := strings.Fields(args)
 			path := ""
-			if strings.Contains(args, filesArgument) {
-				path = strings.TrimSpace(match[3])
+			if len(argsSplit) >= 2 && strings.Contains(argsSplit[0], filesArgument) {
+				path = strings.TrimSpace(argsSplit[1])
 			}
 
 			if args == noIssueArgument {
