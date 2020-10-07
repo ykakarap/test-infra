@@ -660,7 +660,7 @@ func (a ApprovedFolder) String() string {
 		a.branch,
 		a.folderpath,
 	)
-	return fmt.Sprintf("- ~~[%s](%s)~~ [%v]\n", a.folderpath, link, strings.Join(a.approvers.List(), ","))
+	return fmt.Sprintf("- ~~[%s/](%s)~~ (approved) [%v]\n", a.folderpath, link, strings.Join(a.approvers.List(), ","))
 }
 
 func (pa PartiallyApprovedFolder) String() string {
@@ -669,7 +669,7 @@ func (pa PartiallyApprovedFolder) String() string {
 		pa.branch,
 		pa.folderpath,
 	)
-	return fmt.Sprintf("- **[%s](%s)** (partially approved, need additional approvals) [%v]\n", pa.folderpath, link, strings.Join(pa.approvers.List(), ","))
+	return fmt.Sprintf("- **[%s/](%s)** (partially approved, need additional approvals) [%v]\n", pa.folderpath, link, strings.Join(pa.approvers.List(), ","))
 }
 
 func (ua UnapprovedFolder) String() string {
@@ -678,7 +678,7 @@ func (ua UnapprovedFolder) String() string {
 		ua.branch,
 		ua.folderpath,
 	)
-	return fmt.Sprintf("- **[%s](%s)**\n", ua.folderpath, link)
+	return fmt.Sprintf("- **[%s/](%s)**\n", ua.folderpath, link)
 }
 
 // UnapprovedFile contains information approved an unapproved owners file
@@ -759,8 +759,9 @@ The full list of commands accepted by this bot can be found [here]({{ .commandHe
 The pull request process is described [here]({{ .prProcessLink }})
 
 {{ end -}}
-<details {{if (and (not .ap.AreFilesApproved) (not (call .ap.ManuallyApproved))) }}open{{end}}>
-Out of {{len .ap.GetFilesApprovers}}, **{{sub (len .ap.GetFilesApprovers) (len .ap.UnapprovedFiles)}}** are approved and **{{len .ap.UnapprovedFiles}}** are unapproved.
+
+Out of **{{len .ap.GetFilesApprovers}}** files: **{{sub (len .ap.GetFilesApprovers) (len .ap.UnapprovedFiles)}}** are approved and **{{len .ap.UnapprovedFiles}}** are unapproved.  
+
 {{if ne (len .ap.UnapprovedFiles) 0 -}}
 Needs approval from approvers in these files:
 {{range .ap.GetFiles .baseURL .branch}}{{.}}{{end}}
@@ -768,12 +769,13 @@ Needs approval from approvers in these files:
 Approvers can indicate their approval by writing `+"`/approve`"+` in a comment
 Approvers can also choose to approve only specific files by writing `+"`/approve files <path-to-file>`"+` in a comment
 Approvers can cancel approval by writing `+"`/approve cancel`"+` in a comment
-{{end -}}
+{{end -}}  
 
-The status of the PR is:
+The status of the PR is:  
+
 {{range .ap.GetFolderStatus .baseURL .branch}}{{.}}{{end}}
 
-</details>`, "message", map[string]interface{}{"ap": ap, "baseURL": linkURL, "commandHelpLink": commandHelpLink, "prProcessLink": prProcessLink, "org": org, "repo": repo, "branch": branch})
+`, "message", map[string]interface{}{"ap": ap, "baseURL": linkURL, "commandHelpLink": commandHelpLink, "prProcessLink": prProcessLink, "org": org, "repo": repo, "branch": branch})
 	if err != nil {
 		ap.owners.log.WithError(err).Errorf("Error generating message.")
 		return nil
