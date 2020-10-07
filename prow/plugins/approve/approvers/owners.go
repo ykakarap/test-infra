@@ -308,8 +308,8 @@ func (a NoIssueApproval) String() string {
 // code change.
 type Approvers struct {
 	owners           Owners
-	approvers        map[string]Approval // The keys of this map are normalized to lowercase.
-	noissueapprovers map[string]NoIssueApproval
+	approvers        map[string]*Approval // The keys of this map are normalized to lowercase.
+	noissueapprovers map[string]*NoIssueApproval
 	assignees        sets.String
 	AssociatedIssue  int
 	RequireIssue     bool
@@ -338,7 +338,7 @@ func IntersectSetsCase(one, other sets.String) sets.String {
 func NewApprovers(owners Owners) Approvers {
 	return Approvers{
 		owners:    owners,
-		approvers: map[string]Approval{},
+		approvers: map[string]*Approval{},
 		assignees: sets.NewString(),
 
 		ManuallyApproved: func() bool {
@@ -376,7 +376,7 @@ func (ap *Approvers) addApproval(login, how, reference, approvedPath string) {
 		approvedPath = "*"
 	}
 	if approval, ok := ap.approvers[strings.ToLower(login)]; !ok {
-		ap.approvers[strings.ToLower(login)] = Approval{
+		ap.approvers[strings.ToLower(login)] = &Approval{
 			Login: login,
 			How:   how,
 			Infos: []ApprovalInfo{
@@ -403,7 +403,7 @@ func (ap *Approvers) AddNoIssueLGTMer(login, reference string) {
 }
 
 func (ap *Approvers) addNoIssueApproval(login, how, reference string) {
-	ap.noissueapprovers[strings.ToLower(login)] = NoIssueApproval{
+	ap.noissueapprovers[strings.ToLower(login)] = &NoIssueApproval{
 		Login:     login,
 		How:       how,
 		Reference: reference,
@@ -480,8 +480,8 @@ func (ap Approvers) GetFilesApprovers() map[string]sets.String {
 // NoIssueApprovers returns the list of people who have "no-issue"
 // approved the pull-request. They are included in the list iff they can
 // approve one of the files.
-func (ap Approvers) NoIssueApprovers() map[string]NoIssueApproval {
-	nia := map[string]NoIssueApproval{}
+func (ap Approvers) NoIssueApprovers() map[string]*NoIssueApproval {
+	nia := map[string]*NoIssueApproval{}
 	reverseMap := ap.owners.GetReverseMap(ap.owners.GetApprovers())
 
 	for login, approver := range ap.noissueapprovers {
@@ -608,7 +608,7 @@ func (ap Approvers) ListApprovals() []Approval {
 	approvals := []Approval{}
 
 	for _, approver := range ap.GetCurrentApproversSet().List() {
-		approvals = append(approvals, ap.approvers[approver])
+		approvals = append(approvals, *ap.approvers[approver])
 	}
 
 	return approvals
@@ -619,7 +619,7 @@ func (ap Approvers) ListNoIssueApprovals() []Approval {
 	approvals := []Approval{}
 
 	for _, approver := range ap.GetNoIssueApproversSet().List() {
-		approvals = append(approvals, ap.approvers[approver])
+		approvals = append(approvals, *ap.approvers[approver])
 	}
 
 	return approvals
@@ -868,7 +868,7 @@ func wildcardPathSubset(pattern, targetPath string) bool {
 }
 
 // approversForFile return the set of approvers in potentialApprovers who approved the file
-func approversForFile(file string, potentialApprovers sets.String, currentApprovals map[string]Approval) sets.String {
+func approversForFile(file string, potentialApprovers sets.String, currentApprovals map[string]*Approval) sets.String {
 	approvers := sets.NewString()
 
 	potentialApproversLowerCase := sets.NewString()
