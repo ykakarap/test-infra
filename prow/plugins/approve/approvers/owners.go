@@ -72,11 +72,11 @@ func (o Owners) GetApprovers() map[string]sets.String {
 	return filessToApprovers
 }
 
-// GetLeafApprovers returns a map from ownersFiles -> people that are approvers in them (only the leaf)
+// GetLeafApprovers returns a map from files -> people that are approvers in them (only the leaf)
 func (o Owners) GetLeafApprovers() map[string]sets.String {
 	ownersToApprovers := map[string]sets.String{}
 
-	for fn := range o.GetOwnersSet() {
+	for _, fn := range o.filenames {
 		ownersToApprovers[fn] = o.repo.LeafApprovers(fn)
 	}
 
