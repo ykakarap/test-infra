@@ -22,7 +22,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/test-infra/prow/pkg/layeredsets"
 
 	"path/filepath"
 	"reflect"
@@ -34,12 +33,12 @@ const (
 )
 
 type FakeRepo struct {
-	approversMap      map[string]layeredsets.String
+	approversMap      map[string]sets.String
 	leafApproversMap  map[string]sets.String
 	noParentOwnersMap map[string]bool
 }
 
-func (f FakeRepo) Approvers(path string) layeredsets.String {
+func (f FakeRepo) Approvers(path string) sets.String {
 	return f.approversMap[path]
 }
 
@@ -74,15 +73,15 @@ func canonicalize(path string) string {
 
 func createFakeRepo(la map[string]sets.String) FakeRepo {
 	// github doesn't use / at the root
-	a := map[string]layeredsets.String{}
+	a := map[string]sets.String{}
 	for dir, approvers := range la {
 		la[dir] = setToLower(approvers)
-		a[dir] = setToLowerMulti(approvers)
+		a[dir] = setToLower(approvers)
 		startingPath := dir
 		for {
 			dir = canonicalize(filepath.Dir(dir))
 			if parentApprovers, ok := la[dir]; ok {
-				a[startingPath] = a[startingPath].Union(setToLowerMulti(parentApprovers))
+				a[startingPath] = a[startingPath].Union(setToLower(parentApprovers))
 			}
 			if dir == "" {
 				break
@@ -97,14 +96,6 @@ func setToLower(s sets.String) sets.String {
 	lowered := sets.NewString()
 	for _, elem := range s.List() {
 		lowered.Insert(strings.ToLower(elem))
-	}
-	return lowered
-}
-
-func setToLowerMulti(s sets.String) layeredsets.String {
-	lowered := layeredsets.NewString()
-	for _, elem := range s.List() {
-		lowered.Insert(0, strings.ToLower(elem))
 	}
 	return lowered
 }
@@ -173,7 +164,7 @@ func TestCreateFakeRepo(t *testing.T) {
 		}
 
 		test.expectedApprovers = setToLower(test.expectedApprovers)
-		if !calculatedApprovers.Set().Equal(test.expectedApprovers) {
+		if !calculatedApprovers.Equal(test.expectedApprovers) {
 			t.Errorf("Failed for test %v.  Expected Approvers: %v. Actual Approvers %v", test.testName, test.expectedApprovers, calculatedApprovers)
 		}
 	}

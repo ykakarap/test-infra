@@ -32,16 +32,17 @@ import (
 	"k8s.io/test-infra/prow/labels"
 	"k8s.io/test-infra/prow/pluginhelp"
 	"k8s.io/test-infra/prow/plugins"
-	"k8s.io/test-infra/prow/plugins/approve/approvers"
+	"k8s.io/test-infra/prow/plugins/approve2/approvers"
 	"k8s.io/test-infra/prow/repoowners"
 )
 
 const (
 	// PluginName defines this plugin's registered name.
-	PluginName = "approve"
+	PluginName = "approve2"
 
-	approveCommand  = "APPROVE"
+	approveCommand  = "APPROVE2"
 	cancelArgument  = "cancel"
+	filesArgument   = "files"
 	lgtmCommand     = "LGTM"
 	noIssueArgument = "no-issue"
 )
@@ -119,13 +120,15 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 					"ORGANIZATION",
 					"ORGANIZATION/REPOSITORY",
 				},
-				RequireSelfApproval: new(bool),
-				IgnoreReviewState:   new(bool),
+				DeprecatedImplicitSelfApprove: new(bool),
+				RequireSelfApproval:           new(bool),
+				DeprecatedReviewActsAsApprove: new(bool),
+				IgnoreReviewState:             new(bool),
 			},
 		},
 	})
 	if err != nil {
-		logrus.WithError(err).Warnf("cannot generate comments for %s plugin", PluginName)
+		logrus.WithError(err).Warn("cannot generate comments for approve plugin")
 	}
 
 	pluginHelp := &pluginhelp.PluginHelp{
@@ -436,7 +439,7 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 
 	// Author implicitly approves their own PR if config allows it
 	if opts.HasSelfApproval() {
-		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", false)
+		approversHandler.AddAuthorSelfApprover(pr.author, pr.htmlURL+"#", "")
 	} else {
 		// Treat the author as an assignee, and suggest them if possible
 		approversHandler.AddAssignees(pr.author)
@@ -452,7 +455,7 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 	})
 	approveComments := filterComments(comments, approvalMatcher(botName, opts.LgtmActsAsApprove, opts.ConsiderReviewState()))
 	addApprovers(&approversHandler, approveComments, pr.author, opts.ConsiderReviewState())
-	log.WithField("duration", time.Since(start).String()).Debug("Completed filtering approval comments in handle")
+	log.WithField("duration", time.Since(start).String()).Debug("Completed filering approval comments in handle")
 
 	for _, user := range pr.assignees {
 		approversHandler.AddAssignees(user.Login)
@@ -603,7 +606,7 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			approversHandler.AddApprover(
 				c.Author,
 				c.HTMLURL,
-				false,
+				"",
 			)
 		}
 		if reviewActsAsApprove && c.ReviewState == github.ReviewStateChangesRequested {
@@ -615,34 +618,39 @@ func addApprovers(approversHandler *approvers.Approvers, approveComments []*comm
 			if name != approveCommand && name != lgtmCommand {
 				continue
 			}
+
 			args := strings.ToLower(strings.TrimSpace(match[2]))
 			if strings.Contains(args, cancelArgument) {
 				approversHandler.RemoveApprover(c.Author)
 				continue
 			}
 
+			argsSplit := strings.Fields(args)
+			path := ""
+			if len(argsSplit) >= 2 && strings.Contains(argsSplit[0], filesArgument) {
+				path = strings.TrimSpace(argsSplit[1])
+			}
+
+			if args == noIssueArgument {
+				if c.Author == author {
+					approversHandler.AddNoIssueAuthorSelfApprover(c.Author, c.HTMLURL)
+				}
+				if name == approveCommand {
+					approversHandler.AddNoIssueApprover(c.Author, c.HTMLURL)
+				} else {
+					approversHandler.AddNoIssueLGTMer(c.Author, c.HTMLURL)
+				}
+				continue
+			}
+
 			if c.Author == author {
-				approversHandler.AddAuthorSelfApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddAuthorSelfApprover(c.Author, c.HTMLURL, path)
 			}
-
 			if name == approveCommand {
-				approversHandler.AddApprover(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddApprover(c.Author, c.HTMLURL, path)
 			} else {
-				approversHandler.AddLGTMer(
-					c.Author,
-					c.HTMLURL,
-					args == noIssueArgument,
-				)
+				approversHandler.AddLGTMer(c.Author, c.HTMLURL, path)
 			}
-
 		}
 	}
 }
