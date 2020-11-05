@@ -1,7 +1,9 @@
 package(default_visibility = ["//visibility:public"])
 
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
-load("//prow:def.bzl", "prow_image")
+load("@io_bazel_rules_docker//container:bundle.bzl", "container_bundle")
+load("@io_bazel_rules_docker//contrib:push-all.bzl", "docker_push")
+load("//prow:def.bzl", "prow_image", "prow_push")
 
 NAME = "hook"
 
@@ -10,6 +12,15 @@ prow_image(
     base = "@git-base//image",
     component = NAME,
     visibility = ["//visibility:public"],
+)
+
+prow_push(
+    name = "push",
+    images = {
+        "nikhita/hook:{DOCKER_TAG}": ":image",
+        "nikhita/hook:latest": ":image",
+        "nikhita/hook:latest-{BUILD_USER}": ":image",
+    },
 )
 
 go_binary(
