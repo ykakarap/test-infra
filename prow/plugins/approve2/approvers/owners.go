@@ -64,13 +64,13 @@ func NewOwners(log *logrus.Entry, filenames []string, r Repo, s int64) Owners {
 
 // GetApprovers returns a map from filenames -> people that can approve it
 func (o Owners) GetApprovers() map[string]sets.String {
-	filessToApprovers := map[string]sets.String{}
+	filesToApprovers := map[string]sets.String{}
 
 	for _, fn := range o.filenames {
-		filessToApprovers[fn] = o.repo.Approvers(fn).Set()
+		filesToApprovers[fn] = o.repo.Approvers(fn).Set()
 	}
 
-	return filessToApprovers
+	return filesToApprovers
 }
 
 // GetLeafApprovers returns a map from files -> people that are approvers in them (only the leaf)
@@ -85,13 +85,21 @@ func (o Owners) GetLeafApprovers() map[string]sets.String {
 }
 
 // GetAllPotentialApprovers returns the people from relevant owners files needed to get the PR approved
+// It returns a list of people based leaf owners files after subdirectories are ignored.
+// Example: If the PR has the folllowing file file changes:
+// 		- a/b/c.go
+//		- a/b/c/d.go
+//		- p/q.go
+// this function will return the list of approvers in a/b/c/OWNERS and p/OWNERS
 func (o Owners) GetAllPotentialApprovers() []string {
-	approversOnly := []string{}
-	for _, approverList := range o.GetLeafApprovers() {
-		for approver := range approverList {
-			approversOnly = append(approversOnly, approver)
+	approvers := sets.NewString()
+	owners := o.GetOwnersSet()
+	for _, fn := range o.filenames {
+		if owners.Has(o.repo.FindApproverOwnersForFile(fn)) {
+			approvers.Insert(o.repo.LeafApprovers(fn).List()...)
 		}
 	}
+	approversOnly := approvers.List()
 	sort.Strings(approversOnly)
 	if len(approversOnly) == 0 {
 		o.log.Debug("No potential approvers exist. Does the repo have OWNERS files?")
@@ -216,7 +224,7 @@ func (o Owners) GetShuffledApprovers() []string {
 	return people
 }
 
-// GetShuffledApprovers shuffles the potential approvers, without the people
+// GetShuffledApproversSubset shuffles the potential approvers, without the people
 // in remove set, so that we don't always suggest the same people.
 func (o Owners) GetShuffledApproversSubset(remove sets.String) []string {
 	approversList := o.GetAllPotentialApprovers()
@@ -471,7 +479,7 @@ func (ap Approvers) GetNoIssueApproversSet() sets.String {
 func (ap Approvers) GetFilesApprovers() map[string]sets.String {
 	filesApprovers := map[string]sets.String{}
 	for fn, potentialApprovers := range ap.owners.GetApprovers() {
-		// potentialApprovers is the list of githun handles who can approve the fn.
+		// potentialApprovers is the list of github handles who can approve file fn.
 		filesApprovers[fn] = approversForFile(fn, potentialApprovers, ap.approvers)
 	}
 
