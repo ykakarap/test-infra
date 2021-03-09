@@ -85,8 +85,8 @@ func (o Owners) GetLeafApprovers() map[string]sets.String {
 }
 
 // GetAllPotentialApprovers returns the people from relevant owners files needed to get the PR approved
-// It returns a list of people based leaf owners files after subdirectories are ignored.
-// Example: If the PR has the folllowing file file changes:
+// It returns a list of people based on leaf owners files after subdirectories are ignored.
+// Example: If the PR has the following file changes:
 // 		- a/b/c.go
 //		- a/b/c/d.go
 //		- p/q.go
@@ -444,11 +444,9 @@ func (ap *Approvers) AddAssignees(logins ...string) {
 // GetCurrentApproversSet returns the set of approvers (login only, normalized to lower case)
 func (ap Approvers) GetCurrentApproversSet() sets.String {
 	currentApprovers := sets.NewString()
-
 	for approver := range ap.approvers {
 		currentApprovers.Insert(approver)
 	}
-
 	return currentApprovers
 }
 
@@ -615,11 +613,9 @@ func (ap Approvers) IsApproved() bool {
 // ListApprovals returns the list of approvals
 func (ap Approvers) ListApprovals() []Approval {
 	approvals := []Approval{}
-
-	for _, approver := range ap.GetCurrentApproversSet().List() {
-		approvals = append(approvals, *ap.approvers[approver])
+	for _, approval := range ap.approvers {
+		approvals = append(approvals, *approval)
 	}
-
 	return approvals
 }
 
@@ -826,6 +822,11 @@ func getGubernatorMetadata(toBeAssigned []string) string {
 	return ""
 }
 
+// wildcardPathMatch return true if the targetPath matches the given pattern
+// A '*' as a directory will recursively match all sub directories
+//    Example: file a/b1/b2/c.go matches the pattern a/*/c.go
+// A '*' is file name matches 0 or more characters
+//    Example: file a/file_test.go matches the pattern a/*_test.go
 func wildcardPathMatch(pattern, targetPath string) bool {
 	if (len(pattern) == 0) != (len(targetPath) == 0) {
 		return false
@@ -896,34 +897,26 @@ func approversForFile(file string, potentialApprovers sets.String, currentApprov
 
 func approvalsAndBlanketApprovals(approvals []Approval, blanketApprovers sets.String) []Approval {
 	allApprovals := []Approval{}
-
 	apprvs := sets.NewString()
-
 	for _, approval := range approvals {
 		apprvs.Insert(approval.Login)
 		allApprovals = append(allApprovals, approval)
 	}
-
 	for apprvr := range blanketApprovers {
 		if !apprvs.Has(apprvr) {
 			allApprovals = append(allApprovals, Approval{
 				Login: apprvr,
-				Infos: []ApprovalInfo{
-					ApprovalInfo{
-						Path: "*",
-					},
-				},
+				Infos: []ApprovalInfo{{Path: "*"}},
 			})
 		}
 	}
-
 	return allApprovals
 }
 
 func approversOfApprovals(approvals []Approval) sets.String {
 	approvers := sets.NewString()
 	for _, approval := range approvals {
-		approvers.Insert(approval.Login)
+		approvers.Insert(strings.ToLower(approval.Login))
 	}
 	return approvers
 }

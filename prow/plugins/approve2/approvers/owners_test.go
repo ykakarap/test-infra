@@ -681,13 +681,13 @@ func TestGetShuffledApprovers(t *testing.T) {
 			testName:      "Combo and D, Seed 0",
 			filenames:     []string{"a/combo/test.go", "a/d/test.go"},
 			seed:          0,
-			expectedOrder: []string{"erin", "dan", "dan", "carol", "david", "debbie", "chris", "debbie", "eve", "david"},
+			expectedOrder: []string{"debbie", "dan", "david", "carol", "erin", "eve", "chris"},
 		},
 		{
 			testName:      "Combo and D, Seed 2",
 			filenames:     []string{"a/combo/test.go", "a/d/test.go"},
 			seed:          2,
-			expectedOrder: []string{"dan", "carol", "debbie", "dan", "erin", "chris", "eve", "david", "debbie", "david"},
+			expectedOrder: []string{"david", "carol", "eve", "dan", "debbie", "chris", "erin"},
 		},
 	}
 
