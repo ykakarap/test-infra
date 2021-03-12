@@ -346,9 +346,10 @@ func IntersectSetsCase(one, other sets.String) sets.String {
 // NewApprovers create a new "Approvers" with no approval.
 func NewApprovers(owners Owners) Approvers {
 	return Approvers{
-		owners:    owners,
-		approvers: map[string]*Approval{},
-		assignees: sets.NewString(),
+		owners:           owners,
+		approvers:        map[string]*Approval{},
+		noissueapprovers: map[string]*NoIssueApproval{},
+		assignees:        sets.NewString(),
 
 		ManuallyApproved: func() bool {
 			return false
@@ -491,13 +492,13 @@ func (ap Approvers) NoIssueApprovers() map[string]*NoIssueApproval {
 	nia := map[string]*NoIssueApproval{}
 	reverseMap := ap.owners.GetReverseMap(ap.owners.GetApprovers())
 
-	for login, approver := range ap.noissueapprovers {
+	for login, approval := range ap.noissueapprovers {
 
-		if len(reverseMap[login]) == 0 {
+		if files, ok := reverseMap[login]; !ok || len(files) == 0 {
 			continue
 		}
 
-		nia[login] = approver
+		nia[login] = approval
 	}
 
 	return nia
@@ -597,7 +598,7 @@ func (ap Approvers) AreFilesApproved() bool {
 // 	- that there is an associated issue with the PR
 // 	- an OWNER has indicated that the PR is trivial enough that an issue need not be associated with the PR
 func (ap Approvers) RequirementsMet() bool {
-	return ap.AreFilesApproved() && (!ap.RequireIssue || ap.AssociatedIssue != 0 || len(ap.NoIssueApprovers()) != 0)
+	return ap.AreFilesApproved() && (!ap.RequireIssue || ap.AssociatedIssue == 0 || len(ap.NoIssueApprovers()) != 0)
 }
 
 // IsApproved returns a bool indicating whether the PR is fully approved.
@@ -713,6 +714,18 @@ func GenerateTemplate(templ, name string, data interface{}) (string, error) {
 		"sub": func(a, b int) int {
 			return a - b
 		},
+		"sortApprovals": func(l []Approval) []Approval {
+			sort.Slice(l, func(i, j int) bool {
+				return l[i].String() < l[j].String()
+			})
+			return l
+		},
+		"sortFiles": func(l []File) []File {
+			sort.Slice(l, func(i, j int) bool {
+				return l[i].String() < l[j].String()
+			})
+			return l
+		},
 	}
 	buf := bytes.NewBufferString("")
 	if messageTempl, err := template.New(name).Funcs(funcMaps).Parse(templ); err != nil {
@@ -736,7 +749,7 @@ func GetMessage(ap Approvers, linkURL *url.URL, commandHelpLink, prProcessLink, 
 Approval requirements bypassed by manually added approval.
 
 {{end -}}
-This pull-request has been approved by:{{range $index, $approval := .ap.ListApprovals}}{{if $index}}, {{else}} {{end}}{{$approval}}{{end}}
+This pull-request has been approved by:{{range $index, $approval := sortApprovals .ap.ListApprovals}}{{if $index}}, {{else}} {{end}}{{$approval}}{{end}}
 
 {{- if (and (not .ap.AreFilesApproved) (not (call .ap.ManuallyApproved))) }}
 To complete the [pull request process]({{ .prProcessLink }}), please assign {{range $index, $cc := .ap.GetCCs}}{{if $index}}, {{end}}**{{$cc}}**{{end}}
@@ -769,7 +782,7 @@ Out of **{{len .ap.GetFilesApprovers}}** files: **{{sub (len .ap.GetFilesApprove
 
 {{if ne (len .ap.UnapprovedFiles) 0 -}}
 Needs approval from approvers in these files:
-{{range .ap.GetFiles .baseURL .branch}}{{.}}{{end}}
+{{range (sortFiles (.ap.GetFiles .baseURL .branch))}}{{.}}{{end}}
 
 Approvers can indicate their approval by writing `+"`/approve`"+` in a comment
 Approvers can also choose to approve only specific files by writing `+"`/approve files <path-to-file>`"+` in a comment
@@ -778,8 +791,7 @@ Approvers can cancel approval by writing `+"`/approve cancel`"+` in a comment
 
 The status of the PR is:  
 
-{{range .ap.GetFolderStatus .baseURL .branch}}{{.}}{{end}}
-
+{{range (sortFiles (.ap.GetFolderStatus .baseURL .branch))}}{{.}}{{end}}
 `, "message", map[string]interface{}{"ap": ap, "baseURL": linkURL, "commandHelpLink": commandHelpLink, "prProcessLink": prProcessLink, "org": org, "repo": repo, "branch": branch})
 	if err != nil {
 		ap.owners.log.WithError(err).Errorf("Error generating message.")
