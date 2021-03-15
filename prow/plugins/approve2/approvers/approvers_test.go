@@ -809,12 +809,12 @@ func TestIsApprovedWithIssue(t *testing.T) {
 			isApproved:        false,
 		},
 		{
-			testName:          "Single file. No issue. File approved",
+			testName:          "Single file. No issue approval. File approved",
 			filenames:         []string{"a/file.go"},
 			currentlyApproved: []approval{{"Carl", ""}},
 			noIssueApprovers:  sets.NewString(),
 			associatedIssue:   0,
-			isApproved:        true,
+			isApproved:        false,
 		},
 		{
 			testName:          "Single file. With issue. File approved. Issue not approved",
@@ -822,7 +822,7 @@ func TestIsApprovedWithIssue(t *testing.T) {
 			currentlyApproved: []approval{{"Carl", ""}},
 			noIssueApprovers:  sets.NewString(),
 			associatedIssue:   100,
-			isApproved:        false,
+			isApproved:        true,
 		},
 		{
 			testName:          "Single file. With issue. File approved. Issue Approved",
@@ -854,7 +854,7 @@ func TestIsApprovedWithIssue(t *testing.T) {
 			currentlyApproved: []approval{{"Anne", ""}},
 			noIssueApprovers:  sets.NewString("Bill"),
 			associatedIssue:   100,
-			isApproved:        false,
+			isApproved:        true,
 		},
 		{
 			testName:          "Two files. No Issue. Files partially approved. Issue Approved",
@@ -878,7 +878,7 @@ func TestIsApprovedWithIssue(t *testing.T) {
 			currentlyApproved: []approval{{"Carl", ""}},
 			noIssueApprovers:  sets.NewString(),
 			associatedIssue:   0,
-			isApproved:        true,
+			isApproved:        false,
 		},
 		{
 			testName:          "Two files. With Issue. Files not approved. Issue approved",
@@ -1117,7 +1117,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Bi
 To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**
 You can assign the PR to them by writing ` + "`/assign @alice`" + ` in a comment when ready.
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1127,9 +1127,9 @@ Needs approval from approvers in these files:
 - **[a/OWNERS](https://github.com/org/repo/blob/dev/a/OWNERS)**
 
 
-Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comment
-Approvers can also choose to approve only specific files by writing ` + "`/approve files <path-to-file>`" + ` in a comment
-Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
+Approvers can indicate their approval by writing ` + "`/approve2`" + ` in a comment
+Approvers can also choose to approve only specific files by writing ` + "`/approve2 files <path-to-file>`" + ` in a comment
+Approvers can cancel approval by writing ` + "`/approve2 cancel`" + ` in a comment
 The status of the PR is:  
 
 - **[a/](https://github.com/org/repo/blob/dev/a)**
@@ -1164,7 +1164,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Bi
 To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**
 You can assign the PR to them by writing ` + "`/assign @alice`" + ` in a comment when ready.
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1175,9 +1175,9 @@ Needs approval from approvers in these files:
 - **[b/OWNERS](https://github.com/org/repo/blob/dev/b/OWNERS)**
 
 
-Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comment
-Approvers can also choose to approve only specific files by writing ` + "`/approve files <path-to-file>`" + ` in a comment
-Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
+Approvers can indicate their approval by writing ` + "`/approve2`" + ` in a comment
+Approvers can also choose to approve only specific files by writing ` + "`/approve2 files <path-to-file>`" + ` in a comment
+Approvers can cancel approval by writing ` + "`/approve2 cancel`" + ` in a comment
 The status of the PR is:  
 
 - **[a/](https://github.com/org/repo/blob/dev/a)**
@@ -1206,12 +1206,54 @@ func TestGetMessageAllApproved(t *testing.T) {
 	ap.RequireIssue = true
 	ap.AddApprover("Alice", "REFERENCE", "")
 	ap.AddLGTMer("Bill", "REFERENCE", "")
+	ap.AddNoIssueApprover("Alice", "REFERENCE")
 
 	want := `[APPROVALNOTIFIER] This PR is **APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Alice</a>*, *<a href="REFERENCE" title="LGTM">Bill</a>*
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+Associated issue requirement bypassed by: *<a href="REFERENCE" title="Approved">Alice</a>*
+
+The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
+
+The pull request process is described [here](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process)
+
+Out of **2** files: **2** are approved and **0** are unapproved.  
+
+The status of the PR is:  
+
+- ~~[a/](https://github.com/org/repo/blob/master/a)~~ (approved) [alice]
+- ~~[b/](https://github.com/org/repo/blob/master/b)~~ (approved) [bill]
+
+
+<!-- META={"approvers":[]} -->`
+	if got := GetMessage(ap, &url.URL{Scheme: "https", Host: "github.com"}, "https://go.k8s.io/bot-commands", "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process", "org", "repo", "master"); got == nil {
+		t.Error("GetMessage() failed")
+	} else if *got != want {
+		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
+	}
+}
+
+func TestGetMessageFilesApprovedIssueNotApproved(t *testing.T) {
+	ap := NewApprovers(
+		Owners{
+			filenames: []string{"a/a.go", "b/b.go"},
+			repo: createFakeRepo(map[string]sets.String{
+				"a": sets.NewString("Alice"),
+				"b": sets.NewString("Bill"),
+			}),
+			log: logrus.WithField("plugin", "some_plugin"),
+		},
+	)
+	ap.RequireIssue = true
+	ap.AddApprover("Alice", "REFERENCE", "")
+	ap.AddLGTMer("Bill", "REFERENCE", "")
+
+	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
+
+This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Alice</a>*, *<a href="REFERENCE" title="LGTM">Bill</a>*
+
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1252,7 +1294,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Author self-
 To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **bill**
 You can assign the PR to them by writing ` + "`/assign @alice @bill`" + ` in a comment when ready.
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1263,9 +1305,9 @@ Needs approval from approvers in these files:
 - **[b/OWNERS](https://github.com/org/repo/blob/master/b/OWNERS)**
 
 
-Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comment
-Approvers can also choose to approve only specific files by writing ` + "`/approve files <path-to-file>`" + ` in a comment
-Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
+Approvers can indicate their approval by writing ` + "`/approve2`" + ` in a comment
+Approvers can also choose to approve only specific files by writing ` + "`/approve2 files <path-to-file>`" + ` in a comment
+Approvers can cancel approval by writing ` + "`/approve2 cancel`" + ` in a comment
 The status of the PR is:  
 
 - **[a/](https://github.com/org/repo/blob/master/a)**
@@ -1297,7 +1339,7 @@ func TestGetMessageApprovedIssueAssociated(t *testing.T) {
 	ap.AddApprover("Bill", "REFERENCE", "")
 	ap.AddApprover("Alice", "REFERENCE", "")
 
-	want := `[APPROVALNOTIFIER] This PR is **NOT APPROVED**
+	want := `[APPROVALNOTIFIER] This PR is **APPROVED**
 
 This pull-request has been approved by: *<a href="REFERENCE" title="Approved">Alice</a>*, *<a href="REFERENCE" title="Approved">Bill</a>*, *<a href="REFERENCE" title="Author self-approved">John</a>*
 
@@ -1387,7 +1429,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Author self-
 To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **doctor**
 You can assign the PR to them by writing ` + "`/assign @alice @doctor`" + ` in a comment when ready.
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1398,9 +1440,9 @@ Needs approval from approvers in these files:
 - **[b/README.md](https://github.com/org/repo/blob/master/b/README.md)**
 
 
-Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comment
-Approvers can also choose to approve only specific files by writing ` + "`/approve files <path-to-file>`" + ` in a comment
-Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
+Approvers can indicate their approval by writing ` + "`/approve2`" + ` in a comment
+Approvers can also choose to approve only specific files by writing ` + "`/approve2 files <path-to-file>`" + ` in a comment
+Approvers can cancel approval by writing ` + "`/approve2 cancel`" + ` in a comment
 The status of the PR is:  
 
 - **[a/](https://github.com/org/repo/blob/master/a)**
@@ -1434,7 +1476,7 @@ This pull-request has been approved by: *<a href="REFERENCE" title="Author self-
 To complete the [pull request process](https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process), please assign **alice**, **bill**
 You can assign the PR to them by writing ` + "`/assign @alice @bill`" + ` in a comment when ready.
 
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve no-issue`" + `
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with ` + "`/approve2 no-issue`" + `
 
 The full list of commands accepted by this bot can be found [here](https://go.k8s.io/bot-commands?repo=org%2Frepo).
 
@@ -1445,9 +1487,9 @@ Needs approval from approvers in these files:
 - **[b/OWNERS](https://github.mycorp.com/org/repo/blob/master/b/OWNERS)**
 
 
-Approvers can indicate their approval by writing ` + "`/approve`" + ` in a comment
-Approvers can also choose to approve only specific files by writing ` + "`/approve files <path-to-file>`" + ` in a comment
-Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a comment
+Approvers can indicate their approval by writing ` + "`/approve2`" + ` in a comment
+Approvers can also choose to approve only specific files by writing ` + "`/approve2 files <path-to-file>`" + ` in a comment
+Approvers can cancel approval by writing ` + "`/approve2 cancel`" + ` in a comment
 The status of the PR is:  
 
 - **[a/](https://github.mycorp.com/org/repo/blob/master/a)**

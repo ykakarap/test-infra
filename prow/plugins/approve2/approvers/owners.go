@@ -598,7 +598,7 @@ func (ap Approvers) AreFilesApproved() bool {
 // 	- that there is an associated issue with the PR
 // 	- an OWNER has indicated that the PR is trivial enough that an issue need not be associated with the PR
 func (ap Approvers) RequirementsMet() bool {
-	return ap.AreFilesApproved() && (!ap.RequireIssue || ap.AssociatedIssue == 0 || len(ap.NoIssueApprovers()) != 0)
+	return ap.AreFilesApproved() && (!ap.RequireIssue || ap.AssociatedIssue != 0 || len(ap.NoIssueApprovers()) != 0)
 }
 
 // IsApproved returns a bool indicating whether the PR is fully approved.
@@ -621,11 +621,11 @@ func (ap Approvers) ListApprovals() []Approval {
 }
 
 // ListNoIssueApprovals returns the list of "no-issue" approvals
-func (ap Approvers) ListNoIssueApprovals() []Approval {
-	approvals := []Approval{}
+func (ap Approvers) ListNoIssueApprovals() []NoIssueApproval {
+	approvals := []NoIssueApproval{}
 
 	for _, approver := range ap.GetNoIssueApproversSet().List() {
-		approvals = append(approvals, *ap.approvers[approver])
+		approvals = append(approvals, *ap.noissueapprovers[approver])
 	}
 
 	return approvals
@@ -746,7 +746,7 @@ func GenerateTemplate(templ, name string, data interface{}) (string, error) {
 func GetMessage(ap Approvers, linkURL *url.URL, commandHelpLink, prProcessLink, org, repo, branch string) *string {
 	linkURL.Path = org + "/" + repo
 	message, err := GenerateTemplate(`{{if (and (not .ap.RequirementsMet) (call .ap.ManuallyApproved )) }}
-Approval requirements bypassed by manually added approval.
+**Approval requirements bypassed by manually added approval.**
 
 {{end -}}
 This pull-request has been approved by:{{range $index, $approval := sortApprovals .ap.ListApprovals}}{{if $index}}, {{else}} {{end}}{{$approval}}{{end}}
@@ -767,7 +767,7 @@ Associated issue requirement bypassed by:{{range $index, $approval := .ap.ListNo
 *No associated issue*. Requirement bypassed by manually added approval.
 
 {{ else -}}
-*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with `+"`/approve no-issue`"+`
+*No associated issue*. Update pull-request body to add a reference to an issue, or get approval with `+"`/approve2 no-issue`"+`
 
 {{ end -}}
 
@@ -784,9 +784,9 @@ Out of **{{len .ap.GetFilesApprovers}}** files: **{{sub (len .ap.GetFilesApprove
 Needs approval from approvers in these files:
 {{range (sortFiles (.ap.GetFiles .baseURL .branch))}}{{.}}{{end}}
 
-Approvers can indicate their approval by writing `+"`/approve`"+` in a comment
-Approvers can also choose to approve only specific files by writing `+"`/approve files <path-to-file>`"+` in a comment
-Approvers can cancel approval by writing `+"`/approve cancel`"+` in a comment
+Approvers can indicate their approval by writing `+"`/approve2`"+` in a comment
+Approvers can also choose to approve only specific files by writing `+"`/approve2 files <path-to-file>`"+` in a comment
+Approvers can cancel approval by writing `+"`/approve2 cancel`"+` in a comment
 {{end -}}  
 
 The status of the PR is:  

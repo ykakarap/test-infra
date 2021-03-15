@@ -91,7 +91,6 @@ approve:
   - kubernetes/k8s.io
   - kubernetes/org
   - kubernetes/repo-infra
-  - kubernetes/test-infra
   - kubernetes/cloud-provider-gcp
   require_self_approval: false
   ignore_review_state: false
@@ -103,6 +102,16 @@ approve:
   - kubernetes/cloud-provider-openstack
   require_self_approval: false
   ignore_review_state: true
+
+# Note: approve and approve2 should be mutually exclusive
+# to avoid ambiguous behavior.
+# enable approve2 only on kubernetes/test-infra.
+# more repos will be added later
+approve2:
+- repos:
+  - kubernetes/test-infra
+  require_self_approval: false
+  ignore_review_state: false
 
 # Lower bounds in number of lines changed; XS is assumed to be zero.
 size:
